@@ -106,6 +106,10 @@ _DEFAULT_HEADER_BGS = frozenset({"#f4f5f7", "#f2f2f2"})
 _AC_MACRO_TAGS = ["ac:structured-macro", "structured-macro"]
 _AC_PARAMETER_TAGS = ["ac:parameter", "parameter"]
 
+# Macros whose body.view content is rendered from another page, so nested macros are
+# missing from the current page's body.storage.
+_INCLUDE_MACRO_NAMES = ["include", "excerpt-include"]
+
 
 def _rgb_to_hex(r: int, g: int, b: int) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
@@ -3653,12 +3657,70 @@ class Page(Document):
 
             return None
 
+        def _extract_markdown_from_storage(self, el: BeautifulSoup) -> str | None:
+            """Extract markdown content from body.storage by macro position.
+
+            Server / Data Center renders the macro to HTML in body.view without a
+            ``data-macro-id`` and returns an empty editor2, so the raw source only
+            exists in body.storage. The Nth rendered macro corresponds to the Nth
+            storage macro with the same name.
+
+            Macros nested in ``include`` / ``excerpt-include`` belong to another page
+            and are neither resolved nor counted. The position is taken from the
+            element itself instead of a call counter, because
+            ``convert_expand_container`` converts its content twice. If the rendered
+            and storage macro counts differ, positions can't be trusted and None is
+            returned.
+            """
+            if el.find_parent(attrs={"data-macro-name": _INCLUDE_MACRO_NAMES}):
+                return None
+
+            macro_name = str(el.get("data-macro-name", ""))
+            root = el
+            while root.parent is not None:
+                root = root.parent
+            view_macros = [
+                macro
+                for macro in root.find_all("div", attrs={"data-macro-name": macro_name})
+                if isinstance(macro, Tag)
+                and not macro.find_parent(attrs={"data-macro-name": _INCLUDE_MACRO_NAMES})
+            ]
+            storage_macros = self._storage_macros_by_name(macro_name)
+            if len(view_macros) != len(storage_macros):
+                logger.debug(
+                    f"Markdown macro ({macro_name}) count mismatch: {len(view_macros)} in "
+                    f"body.view, {len(storage_macros)} in body.storage"
+                )
+                return None
+
+            idx = next((i for i, macro in enumerate(view_macros) if macro is el), None)
+            if idx is None:
+                return None
+
+            storage_macro = storage_macros[idx]
+            markdown_content = self._extract_plain_text_body(
+                storage_macro
+            ) or self._extract_markdown_parameter(storage_macro)
+            if markdown_content and markdown_content.strip():
+                return markdown_content
+            return None
+
         def convert_markdown(self, el: BeautifulSoup, text: str, parent_tags: list[str]) -> str:
             """Convert Markdown macro fragments to Markdown.
 
             Supports both standard 'markdown' macro and 'mohamicorp-markdown'
-            macro. The content is already in Markdown format, so we just extract
-            and return it.
+            macro. The raw Markdown source is looked up in this order:
+
+            1. **body.view**: ``plain-text-body`` or ``markdown`` parameter inside
+               the macro element, if the renderer kept it.
+            2. **editor2** (Cloud): structured macro matched by ``data-macro-id``.
+            3. **body.storage** (Server / Data Center): structured macro matched by
+               position, see ``_extract_markdown_from_storage``.
+            4. **Rendered content**: no source found, the rendered macro HTML is
+               converted as usual and a warning is logged. Formatting may differ
+               from the source.
+            5. **Nothing**: the rendered content is empty too, a ``content not
+               found`` comment is emitted and a warning is logged.
             """
             macro_name = el.get("data-macro-name", "")
 
@@ -3670,6 +3732,17 @@ class Page(Document):
                 macro_id = el.get("data-macro-id")
                 if macro_id and isinstance(macro_id, str):
                     markdown_content = self._extract_markdown_from_editor2(macro_id)
+
+            # Server / Data Center keeps the source only in body.storage
+            if not markdown_content:
+                markdown_content = self._extract_markdown_from_storage(el)
+
+            if not markdown_content and text.strip():
+                logger.warning(
+                    f"Markdown macro ({macro_name}) source not found, "
+                    "falling back to the rendered content"
+                )
+                return f"\n{text.strip()}\n\n"
 
             if not markdown_content:
                 logger.warning(

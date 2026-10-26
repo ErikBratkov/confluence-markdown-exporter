@@ -34,7 +34,7 @@ Exports individual pages, pages with descendants, folders, or entire spaces via 
 - **[draw.io](https://marketplace.atlassian.com/apps/1210933/draw-io-diagrams-uml-bpmn-aws-erd-flowcharts)**: diagram files saved as attachments and shown via their preview image, on Cloud and on Server/Data Center; embedded Mermaid diagrams extracted as fenced Mermaid blocks
 - **Gliffy**: diagrams shown via their preview image; the diagram source is saved with a `.gliffy` extension
 - **[PlantUML](https://marketplace.atlassian.com/apps/1222993/flowchart-plantuml-diagrams-for-confluence)**: exported as fenced PlantUML code blocks, both the Server/Data Center macro (`plantuml`) and the Cloud macro (`plantumlcloud`); the diagram source is exported, not the rendered image
-- **[Markdown Extensions](https://marketplace.atlassian.com/apps/1215703/markdown-extensions-for-confluence)**: pass-through of raw Markdown macro content
+- **[Markdown Extensions](https://marketplace.atlassian.com/apps/1215703/markdown-extensions-for-confluence)**: pass-through of raw Markdown macro content, on Cloud and on Server/Data Center (where the source is read from the page storage format); if the source can't be found, the rendered macro content is exported instead
 
 ### Output layout
 
